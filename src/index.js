@@ -8,12 +8,12 @@ const profileRoutes = require('./routes/profile');
 const walletRoutes = require('./routes/wallets');
 const tokenBanRoutes = require('./routes/tokenBan');
 const { initializeMoralis } = require('./config/moralis');
-
+const adminRoutes = require('./routes/admin');
 const app = express();
 
 // Middleware
 app.use(cors({
-    origin: ['http://localhost:443', 'https://cryptorubyx.rb-rubydev.fr'], // Liste d'origines autorisées
+    origin: ['http://localhost:443', 'https://cryptorubyx.rb-rubydev.fr','http://localhost:3000'], // Liste d'origines autorisées
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   }));
@@ -31,6 +31,7 @@ app.use('/api/keys', apiKeyRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/wallets', walletRoutes);
 app.use('/api/token-ban', tokenBanRoutes); 
+app.use('/api/admin', adminRoutes);
 
 // Routes de base
 app.get('/', (req, res) => {

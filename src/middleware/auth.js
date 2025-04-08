@@ -17,6 +17,18 @@ async function authenticateToken(req, res, next) {
   }
 }
 
+async function isAdmin(req, res, next) {
+  try {
+    if (!req.user || req.user.email !== 'admin@cryptorubyx.local') {
+      return res.status(403).json({ error: 'Accès non autorisé' });
+    }
+    next();
+  } catch (error) {
+    return res.status(403).json({ error: 'Erreur de vérification admin' });
+  }
+}
+
 module.exports = {
-  authenticateToken
+  authenticateToken,
+  isAdmin
 }; 

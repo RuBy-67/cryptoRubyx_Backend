@@ -19,6 +19,7 @@ router.post('/login', async (req, res) => {
         const credentials = req.body;
         console.log('Tentative de connexion avec les données:', {
             email: credentials.email,
+            username: credentials.username,
             password: '********' // On ne log pas le mot de passe pour des raisons de sécurité
         });
         const authData = await authService.login(credentials);

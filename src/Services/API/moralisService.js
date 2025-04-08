@@ -6,6 +6,7 @@ class MoralisService {
     constructor() {
         this.cache = new Map();
         this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
+        this.tokenPriceCache = new Map();
     }
 
     async ensureInitialized() {
@@ -27,6 +28,48 @@ class MoralisService {
             data,
             timestamp: Date.now()
         });
+    }
+
+    // Nouvelle fonction pour formater les montants avec les décimales
+    formatTokenAmount(amount, decimals) {
+        if (!amount) return "0";
+        
+        try {
+            // Convertir le montant en chaîne et supprimer la notation scientifique
+            let amountStr = amount.toString();
+            
+            // Si le montant est en notation scientifique, le convertir
+            if (amountStr.includes('e')) {
+                amountStr = BigInt(amount).toString();
+            }
+            
+            // Vérifier si le montant est déjà formaté
+            if (amountStr.includes('.')) {
+                return amountStr;
+            }
+            
+            // S'assurer que decimals est un nombre
+            const decimalPlaces = parseInt(decimals) || 9;
+            
+            // Convertir en BigInt pour le calcul
+            const value = BigInt(amountStr);
+            const divisor = BigInt(10 ** decimalPlaces);
+            
+            // Effectuer la division
+            const wholePart = value / divisor;
+            const fractionalPart = value % divisor;
+            
+            // Formater la partie fractionnaire
+            let fractionalStr = fractionalPart.toString().padStart(decimalPlaces, '0');
+            // Supprimer les zéros à la fin
+            fractionalStr = fractionalStr.replace(/0+$/, '');
+            
+            // Construire le résultat final
+            return fractionalStr ? `${wholePart}.${fractionalStr}` : wholePart.toString();
+        } catch (error) {
+            console.error('Erreur lors du formatage du montant:', error);
+            return "0";
+        }
     }
 
     async getWalletData(address, chain = 'ETHEREUM') {
@@ -314,23 +357,90 @@ class MoralisService {
         }
     }
 
+    async getSPLTokenPrice(mintAddress, symbol = '') {
+        try {
+            // Pour les tokens stakés (préfixe 'S'), essayer de récupérer le prix du token de base d'abord
+            if (symbol && symbol.startsWith('S') && symbol.length > 1) {
+                const baseSymbol = symbol.substring(1); // Enlever le 'S' du début
+                console.log(`Token staké détecté (${symbol}). Recherche du prix pour le token de base: ${baseSymbol}`);
+                
+                // Chercher dans le cache
+                if (this.tokenPriceCache && this.tokenPriceCache.has(baseSymbol)) {
+                    const baseTokenPrice = this.tokenPriceCache.get(baseSymbol);
+                    console.log(`Prix trouvé dans le cache pour ${baseSymbol}:`, baseTokenPrice);
+                    return baseTokenPrice;
+                }
+            }
+
+            // Si ce n'est pas un token staké ou si le prix n'est pas dans le cache
+            try {
+                const moralisPrice = await Moralis.SolApi.token.getTokenPrice({
+                    network: "mainnet",
+                    address: mintAddress
+                });
+
+                const priceData = moralisPrice.toJSON();
+                if (priceData?.usdPrice) {
+                    const tokenPrice = {
+                        usdPrice: priceData.usdPrice,
+                        usdPrice24hChange: priceData.usdPrice24hrPercentChange || 0,
+                        usdMarketCap: priceData.usdMarketCap || 0,
+                        usdVolume24h: priceData.usdVolume24h || 0,
+                        lastUpdated: new Date().toISOString()
+                    };
+
+                    // Stocker le prix dans le cache si c'est un token de base
+                    if (symbol && !symbol.startsWith('S')) {
+                        if (!this.tokenPriceCache) this.tokenPriceCache = new Map();
+                        this.tokenPriceCache.set(symbol, tokenPrice);
+                        console.log(`Prix stocké dans le cache pour ${symbol}:`, tokenPrice);
+                    }
+
+                    return tokenPrice;
+                }
+            } catch (moralisError) {
+                console.log(`Moralis price not found for ${mintAddress}, trying alternatives...`);
+            }
+
+            // Si c'est un token staké, on retourne le même prix que le token de base même si on n'a pas trouvé de prix
+            if (symbol && symbol.startsWith('S') && symbol.length > 1) {
+                const baseSymbol = symbol.substring(1);
+                // Chercher à nouveau dans le cache (au cas où il aurait été ajouté entre temps)
+                if (this.tokenPriceCache && this.tokenPriceCache.has(baseSymbol)) {
+                    const baseTokenPrice = this.tokenPriceCache.get(baseSymbol);
+                    console.log(`Prix trouvé dans le cache pour ${baseSymbol} (second essai):`, baseTokenPrice);
+                    return baseTokenPrice;
+                }
+            }
+
+            console.warn(`Aucun prix trouvé pour le token ${mintAddress} (${symbol})`);
+            return null;
+        } catch (error) {
+            console.error(`Erreur lors de la récupération du prix pour ${mintAddress}:`, error);
+            return null;
+        }
+    }
+
     async getSolanaWalletData(address) {
         try {
             await this.ensureInitialized();
-
+            
+            // Réinitialiser le cache des prix pour cette nouvelle requête
+            this.tokenPriceCache = new Map();
+            
             // Récupérer le solde natif (SOL)
             const nativeBalance = await Moralis.SolApi.account.getBalance({
                 address
             });
 
-          
-            const solBalance = parseFloat(nativeBalance.toJSON().lamports) / 1e9;
-    
-
-            // Récupérer les tokens SPL (équivalent aux ERC20 sur Ethereum)
+            // Récupérer les tokens SPL
             const tokenBalances = await Moralis.SolApi.account.getSPL({
                 address
             });
+
+            // Formater le solde SOL avec 9 décimales
+            const rawSolBalance = nativeBalance.toJSON().lamports;
+            const solBalance = this.formatTokenAmount(rawSolBalance, 9);
 
             // Récupérer les NFTs
             const nfts = await Moralis.SolApi.account.getNFTs({
@@ -387,18 +497,61 @@ class MoralisService {
                 }
             }
 
+            // Trier les tokens pour traiter d'abord les non-stakés
+            const tokens = tokenBalances.toJSON();
+            const sortedTokens = tokens.sort((a, b) => {
+                const aIsStaked = a.symbol?.startsWith('S') || false;
+                const bIsStaked = b.symbol?.startsWith('S') || false;
+                if (aIsStaked && !bIsStaked) return 1;
+                if (!aIsStaked && bIsStaked) return -1;
+                return 0;
+            });
+
+            // Tokens SPL avec gestion correcte des décimales et prix
+            const formattedTokenBalances = await Promise.all(sortedTokens.map(async token => {
+                const tokenDecimals = token.decimals || 9;
+                const rawBalance = token.amount || "0";
+                const formattedBalance = this.formatTokenAmount(rawBalance, tokenDecimals);
+                
+                // Récupérer le prix du token SPL
+                const tokenPrice = await this.getSPLTokenPrice(token.mint, token.symbol);
+                
+                // Log détaillé pour le débogage
+                console.log(`Token ${token.symbol} (${token.mint}):`, {
+                    rawBalance,
+                    decimals: tokenDecimals,
+                    formattedBalance,
+                    price: tokenPrice?.usdPrice,
+                    isStaked: token.symbol?.startsWith('S'),
+                    marketData: tokenPrice
+                });
+
+                return {
+                    type: 'SPL',
+                    address: token.mint,
+                    name: token.name || 'Unknown Token',
+                    symbol: token.symbol || 'UNKNOWN',
+                    decimals: tokenDecimals,
+                    balance: formattedBalance,
+                    rawBalance: rawBalance,
+                    lastUpdated: new Date().toISOString(),
+                    marketData: tokenPrice
+                };
+            }));
+
             // Formater la réponse finale
             const response = {
                 address,
                 chain: SUPPORTED_CHAINS.SOLANA.name,
-                nativeBalance: solBalance.toString(),
+                nativeBalance: solBalance,
                 balances: [
                     // Token natif (SOL)
                     {
                         type: 'NATIVE',
                         symbol: 'SOL',
                         name: 'Solana',
-                        balance: solBalance.toString(),
+                        balance: solBalance,
+                        rawBalance: rawSolBalance,
                         address: 'So11111111111111111111111111111111111111112',
                         decimals: 9,
                         lastUpdated: new Date().toISOString(),
@@ -410,15 +563,15 @@ class MoralisService {
                             last_updated: nativeTokenPrice.lastUpdated
                         }
                     },
-                    // Tokens SPL
-                    ...tokenBalances.toJSON().map(token => ({
-                        type: 'ERC20',
-                        address: token.mint,
-                        name: token.name || 'Unknown Token',
-                        symbol: token.symbol || 'UNKNOWN',
-                        decimals: token.decimals,
-                        balance: token.amount,
-                        lastUpdated: new Date().toISOString()
+                    ...formattedTokenBalances.map(token => ({
+                        ...token,
+                        marketData: token.marketData ? {
+                            price: token.marketData.usdPrice,
+                            percent_change_24h: token.marketData.usdPrice24hChange,
+                            market_cap: token.marketData.usdMarketCap,
+                            volume_24h: token.marketData.usdVolume24h,
+                            last_updated: token.marketData.lastUpdated
+                        } : null
                     }))
                 ],
                 nfts: nfts.toJSON().map(nft => ({
@@ -432,6 +585,13 @@ class MoralisService {
                 })),
                 lastUpdated: new Date().toISOString()
             };
+
+            // Log pour vérifier la structure finale
+            console.log('Structure finale des tokens:', response.balances.map(token => ({
+                symbol: token.symbol,
+                price: token.marketData?.price,
+                marketData: token.marketData
+            })));
 
             return response;
         } catch (error) {
