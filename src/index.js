@@ -12,7 +12,16 @@ const { initializeMoralis } = require('./config/moralis');
 const app = express();
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: ['http://localhost:443', 'https://cryptorubyx.rb-rubydev.fr'], // Liste d'origines autorisées
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }));
+  
+  
+
+
+
 app.use(express.json());
 
 // Routes
