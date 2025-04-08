@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateToken } = require('../middleware/auth');
-const tokenBanService = require('../Services/tokenBanService');
+const tokenBanService = require('../services/tokenBanService');
 const db = require('../database');
 
 // Middleware d'authentification pour toutes les routes

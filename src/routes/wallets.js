@@ -3,8 +3,8 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { authenticateToken } = require('../middleware/auth');
 const db = require('../database');
-const moralisService = require('../Services/API/moralisService');
-const PortfolioHistoryService = require('../Services/portfolioHistoryService');
+const moralisService = require('../services/API/moralisService');
+const PortfolioHistoryService = require('../services/portfolioHistoryService');
 
 // Récupérer tous les wallets d'un utilisateur
 router.get('/', authenticateToken, async (req, res) => {
