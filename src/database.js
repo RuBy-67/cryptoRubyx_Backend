@@ -79,8 +79,6 @@ async function initializeDatabase() {
             )
         `);
 
-        // Supprimer la table si elle existe pour la recréer avec la bonne structure
-        await db.runAsync('DROP TABLE IF EXISTS portfolio_history');
         
         // Table de l'historique du portfolio
         await db.runAsync(`
