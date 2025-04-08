@@ -17,9 +17,15 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
     try {
         const credentials = req.body;
+        console.log('Tentative de connexion avec les données:', {
+            email: credentials.email,
+            password: '********' // On ne log pas le mot de passe pour des raisons de sécurité
+        });
         const authData = await authService.login(credentials);
+        console.log('Connexion réussie pour l\'utilisateur:', authData.user?.email || 'inconnu');
         res.json(authData);
     } catch (error) {
+        console.error('Échec de la connexion:', error.message);
         res.status(401).json({ error: error.message });
     }
 });
